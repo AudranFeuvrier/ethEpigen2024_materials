@@ -1,0 +1,12 @@
+---
+title: "assignment"
+author: "Audran Feuvrier"
+date: "2024-02-27"
+output: html_document
+---
+
+```{r}
+library(epiwraps)
+sessionInfo()
+
+```
