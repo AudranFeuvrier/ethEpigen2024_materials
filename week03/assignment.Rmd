@@ -1,0 +1,125 @@
+---
+title: "assignment"
+author: "Audran Feuvrier"
+date: "2024-03-09"
+output: html_document
+---
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(Rsubread)
+  library(rtracklayer)
+  library(Biostrings)
+  library(Rfastp)
+  library(epiwraps)
+})
+ah <- AnnotationHub()
+```
+```{r, eval=FALSE}
+dir.create("C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week3/rfastp.trimmed") #create folder to save the trimmed file and statistics
+```
+```{r}
+fastq_file="C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week3/ChIP-seq CTCF/ENCFF127RRR.fastq"
+
+path_to_trim="C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week3/rfastp.trimmed/"
+
+path_to_genome="C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week3/BDGP6_genome"
+
+```
+
+
+```{r, eval=FALSE}
+qc <- Rfastp::rfastp(fastq_file, thread=10, overrepresentationAnalysis=TRUE,
+                 outputFastq=file.path(path_to_trim,gsub("\\.fastq\\.gz$","",basename(fastq_file))))
+```
+
+```{r, eval=FALSE}
+Rfastp::curvePlot(qc, curve="content_curves")
+```
+
+
+# Alignment
+
+### Building a genome index for mapping
+
+```{r, eval=FALSE}
+q <- query(ah, c("Drosophila", "2Bit")) 
+# we get the genome sequence from AnnotationHub
+genome <- ah[["AH106160"]] #BDGP6 version 32 dna_sm
+
+# we create a new directory that will contain the genome index
+#dir.create(path_to_genome)
+
+# we write the genome sequence in fasta format
+export(import.2bit(genome), paste(path_to_genome, "genome.fasta.gz", sep="/"), compress=TRUE)
+
+# we build a Rsubread index
+Rsubread::buildindex("BDGP6_genome/rsubread", reference="BDGP6_genome/genome.fasta.gz") #build that index using that fasta file
+```
+
+### Alignment
+
+```{r}
+
+#dir.create("C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week3/aligned")
+
+path_to_alignment="C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week3/aligned"
+
+align.stats <- Rsubread::align(index="BDGP6_genome/rsubread", type="dna",
+                               readfile1=paste(path_to_trim, "ENCFF127RRR.fastq_R1.fastq", sep="/"), 
+                               output_file=paste(path_to_alignment, "/CTCF.bam", sep="/"),
+                               nthreads=10, sortReadsByCoordinates=TRUE)
+```
+
+### How many reads (and what percentage) were mapped
+
+```{r}
+align.stats$CTCF.bam[2] #How many reads are mapped
+align.stats$CTCF.bam[2]/align.stats$CTCF.bam[1]*100 #percentage
+
+```
+
+
+## Peaks
+```{r, message = FALSE}
+#message=FALSE because callPeaks prints a ton of useless information for the report
+peaks <- callPeaks(paste(path_to_alignment, "/CTCF.bam", sep="/"), fragLength=50L)
+
+# if we want to save it as a bed file:
+#rtracklayer::export.bed(peaks, "peaks/peaks.bed")
+
+```
+
+### How many peaks were found:
+```{r}
+length(peaks)
+```
+
+### Having a look at a peak inside a gene:
+```{r}
+q2 <- query(ah, c("Drosophila", "ensdb", "BDGP6.32")) 
+ensdb <- ah[["AH109569"]] #AH109569 This ensdb record has the right genome build BDGP6.32
+``` 
+
+```{r}
+g=genes(ensdb)
+pcg=g[which(g$gene_biotype=="protein_coding")] #keep only the protein coding genes within g
+```
+
+```{r}
+findOverlaps(peaks, g) #could look for peaks in protein coding genes only too 
+#let's choose the first hit and see in which gene it occurs
+g[subjectHits(findOverlaps(peaks, g)[1])]$gene_id #which gene it is
+peak_in_gene=queryHits(findOverlaps(peaks, g)[1]) #returns peak index of the first overlap hit
+
+```
+
+```{r}
+plotSignalTracks(paste(path_to_alignment, "/CTCF.bam", sep="/"), region=peaks[peak_in_gene],
+                 extend=1000) #extend allows to see the nucleotides around the peak
+
+```
+
+
+
