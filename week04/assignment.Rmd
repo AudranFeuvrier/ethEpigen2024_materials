@@ -1,0 +1,51 @@
+---
+title: "assignment"
+author: "Audran Feuvrier"
+date: "2024-03-16"
+output: html_document
+---
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(rtracklayer)
+  library(epiwraps)
+  library(GenomicRanges)
+})
+ah <- AnnotationHub()
+```
+
+    Find and download from ENCODE the peaks (i.e. bed-like format) for the following in mouse embryonic stem cells (mESC) :
+        Transcription factor p300
+        histone modifications H3K4me3, H3K4me1, H3K27ac, and H3K27me3
+        (when there are replicates, we recommend using the bed file denoted as “conservative IDR thresholded peaks”)
+    QUESTION: Of the p300 peaks, what proportion overlap each of the marks?
+
+```{r}
+path_to_peaks="C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week4/assignment peaks files"
+
+#Load in peaks for each P300 and markers
+peaks_H3K4me3  <- rtracklayer::import(paste(path_to_peaks, "ENCFF671UNN.bed", sep="/"), format="narrowPeak")
+
+peaks_H3K27ac <- rtracklayer::import(paste(path_to_peaks, "ENCFF857FNO.bed", sep="/"), format="narrowPeak")
+
+peaks_P300 <- rtracklayer::import(paste(path_to_peaks, "ENCFF460EOA.bed", sep="/"), format="narrowPeak")
+
+peaks_H3K27me3 <- rtracklayer::import(paste(path_to_peaks, "ENCFF055QNY.bed", sep="/"), format="narrowPeak")
+
+peaks_H3K4me1 <- rtracklayer::import(paste(path_to_peaks, "ENCFF824AFZ.bed", sep="/"), format="narrowPeak")
+
+```
+
+```{r}
+#Get overlaps between P300 and each of the markers separately
+q1=queryHits(findOverlaps(peaks_P300, peaks_H3K4me1))
+q2=queryHits(findOverlaps(peaks_P300, peaks_H3K4me3))
+q3=queryHits(findOverlaps(peaks_P300, peaks_H3K27ac))
+q4=queryHits(findOverlaps(peaks_P300, peaks_H3K27me3))
+
+set_of_common_hits= Reduce(intersect, list(q1, q4, q2, q3)) #find hits that are common between each queryHits for P300 and the 4 markers
+length(set_of_common_hits)/length(peaks_P300) #print the proportion
+```
+
+
