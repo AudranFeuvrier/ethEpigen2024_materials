@@ -1,0 +1,122 @@
+---
+title: "assignment"
+author: "Audran Feuvrier"
+date: "2024-04-16"
+output: html_document
+---
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(GenomicRanges)
+  library(ggplot2)
+  library(motifmatchr) # for scanning sequences for matches of given motifs
+  library(Biostrings) # for handling sequences
+  library(MotifDb) # database of motifs
+  library(TFBSTools) # for handling some motif formats
+  library(universalmotif) # for converting motifs to various formats
+  library(PWMEnrich) # for R-based motif enrichment analysis
+})
+```
+
+
+# Obtaining peak sequences
+
+```{r}
+path="C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week6"
+peaks <- rtracklayer::import(paste(path, "ENCFF097OXR.bed", sep="/"), format="NarrowPeak")
+seqlevelsStyle(peaks) <- "Ensembl"  # to change the convention of the chromosome names to ensembl (i.e. without 'chr')
+peaks_chr1 <- peaks[seqnames(peaks)=="1"]
+peaks_chr1
+```
+
+We also get the genome sequence:
+
+```{r}
+ah <- AnnotationHub()
+q <- AnnotationHub::query(ah, c("GRCh38", "TwoBitFile"))
+q
+```
+
+```{r}
+genome <- ah[["AH106285"]]
+genome
+genome_seqs=import(genome)
+
+#convert to fasta format
+Biostrings::writeXStringSet(genome_seqs, paste(path, "genome.fa", sep="/"))
+```
+
+## Getting the desired motif
+
+```{r}
+# we search for "GATA4" in the motif database
+motifs <- query(MotifDb, "GATA4")
+# there are several matching motifs:
+names(motifs)
+# we select one:
+motif <- motifs[["Hsapiens-HOCOMOCOv11-core-A-GATA4_HUMAN.H11MO.0.A"]]
+motif
+# we visualize it:
+view_motifs(motifs[1:2])
+
+```
+
+## Scanning the whole genome
+
+To scan the whole genome, one needs to use the genome sequence as input subject.
+For example, using `motifmatchr::matchMotif` :
+
+```{r}
+# we also need to convert the motif to a format that this package will accept
+motif2 <- convert_motifs(motif, class="TFBSTools-PWMatrix")
+
+moi <- motifmatchr::matchMotifs(motif2, subject=peaks_chr1, genome=Rsamtools::FaFile(paste(path, "genome.fa", sep="/")), out="positions") # specify that we want the function to return the genomic positions of each motif match
+
+moi <- moi[[1]] # we scanned for just one motif, so we get the results for that motif
+moi
+```
+
+```{r}
+peak_containing_motif=subsetByOverlaps(peaks_chr1, moi)
+
+length(peak_containing_motif)/length(peaks_chr1)*100
+```
+of the 1230 peaks, 156 (12.7%) contain a motif
+
+```{r}
+moi
+motif_containing_peak=subsetByOverlaps(moi, peaks_chr1)
+
+length(moi)/length(motif_containing_peak)*100
+
+```
+
+of the 184 motif instances, 184 (100%) overlap a peak
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
