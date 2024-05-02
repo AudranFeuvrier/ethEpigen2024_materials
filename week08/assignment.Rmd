@@ -1,0 +1,172 @@
+---
+title: "assignment"
+author: "Audran Feuvrier"
+date: "2024-04-29"
+output: html_document
+---
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(epiwraps)
+  library(motifmatchr)
+  library(MotifDb)>
+  library(universalmotif)
+  library(ggplot2)
+  library(SummarizedExperiment) # data structure
+  library(sechm) # for plotting heatmaps from a SummrizedExperiment
+  library(BiocParallel) # for multithreading
+  library(chromVAR) # for motif accessibility estimation
+  library(limma) # for statistical analysis
+})
+
+register(SnowParam(6))
+```
+
+Get motifs from motif database:
+```{r}
+motifs <- query(MotifDb, c("HOCOMOCOv10", "Mmusculus"))
+# convert to a format motifmatchr can use, and use the gene symbols as names
+motifs <- do.call(TFBSTools::PWMatrixList, setNames(
+           universalmotif::convert_motifs(motifs, class="TFBSTools-PWMatrix"),
+           mcols(motifs)$geneSymbol))
+```
+
+Get the corresponding genome:
+```{r}
+#GRcm38 mouse reference genome
+genome=rtracklayer::import("genome.fa", format = "fasta")
+```
+
+```{r}
+path="C:/Users/Audran/Documents/ETHZ Master/Bioinformatical approaches to regulatory genomics and epigenetics/assignments/week8"
+
+#read peaks in SummarizedExperiment format
+se <- readRDS(paste(path, "mouse_mm38_hippocampus.peakCounts.SE.rds", sep="/"))
+colnames(se)
+```
+
+
+```{r}
+#correct the peaks for GC bias
+se <- chromVAR::addGCBias(se, genome=genome)
+```
+
+
+
+```{r}
+# we find which peaks contain which motifs
+moi <- motifmatchr::matchMotifs(motifs, subject=se, genome=genome) #for each se region if there is a motif in it
+
+# for each peak, we identify similar peaks as background
+set.seed(1234)
+bg <- chromVAR::getBackgroundPeaks(object=as.matrix(assays(se)$counts), niterations=1000, bias=rowData(se)$bias)
+
+# for each motif, we compute per-sample deviations relative to the background
+dev <- chromVAR::computeDeviations(object =as.matrix(assays(se)$counts), annotations=as.matrix(assay(moi)), background_peaks=bg)
+
+dev
+```
+
+
+```{r}
+dev$condition <- c(rep("CTRL",6), rep("FSS", 6))
+dev$sex = c(rep("f", 3), rep("m", 3), rep("f", 3), rep("m", 3))
+
+dev$condition <- factor(dev$condition)
+dev$condition <- relevel(dev$condition, "CTRL")
+
+#define the design
+mm <- model.matrix(~condition, data=as.data.frame(colData(dev))) 
+mm
+```
+
+```{r}
+#fit the model
+fit <- eBayes(lmFit(object=assays(dev)$z, design=mm))
+
+#we select from mm the coef we want to test
+res <- as.data.frame(topTable(fit, coef="conditionFSS", number = Inf)) 
+head(res)
+
+res$TF <- res$ID
+ggplot(res, aes(logFC, -log10(adj.P.Val), label=TF)) + geom_text() 
+```
+
+```{r}
+metadata(dev)$anno_colors <- list(condition=c(CTRL="lightgrey", FSS="darkred"))
+sechm::sechm(dev, features = head(res$TF), assayName="z", top_annotation = c("condition", "depth"))
+```
+
+
+Let's view the motifs of the two signifant motifs 
+```{r}
+view_motifs(motifs[c("GCR","ANDR")])
+```
+
+
+GCR and ANDR have very similar motifs.
+Between the control group and the "Forced swim stress" group we find a significant difference in accessibility scores for the motifs of GCR and ANDR.
+
+Let's compare male and females:
+```{r}
+dev$sex <- factor(dev$sex)
+dev$sex <- relevel(dev$sex, "m")
+
+mm <- model.matrix(~sex, data=as.data.frame(colData(dev))) #define the experimental design
+mm
+```
+
+```{r}
+fit <- eBayes(lmFit(object=assays(dev)$z, design=mm)) 
+#we select from mm the coef we want to test
+res <- as.data.frame(topTable(fit, coef="sexf", number = Inf)) 
+head(res)
+
+res$TF <- res$ID
+ggplot(res, aes(logFC, -log10(adj.P.Val), label=TF)) + geom_text() 
+```
+
+According to the table the top most significant motifs in head(res) have a significant adjusted P-value (p<0.05)
+
+```{r}
+metadata(dev)$anno_colors <- list(condition=c(CTRL="lightgrey", FSS="darkred"))
+sechm::sechm(dev, features = head(res$TF), assayName="z", top_annotation = c("condition", "depth"))
+```
+
+```{r}
+view_motifs(motifs[head(res$TF)])
+```
+
+Between males and females  there is a significant difference between the accessibility scores of the following motifs: TYY1, TEAD1, RUNX3, MYB, ZN143, PTF1A. 
+
+
+Let's look at the interaction term between sex and condition to see if there is a different effect of the condition on males and females:
+```{r}
+mm <- model.matrix(~sex*condition, data=as.data.frame(colData(dev))) 
+mm
+```
+
+```{r}
+fit <- eBayes(lmFit(object=assays(dev)$z, design=mm)) 
+#we select from mm the coef we want to test
+res <- as.data.frame(topTable(fit, coef="sexf:conditionFSS", number = Inf))
+head(res)
+
+res$TF <- res$ID
+ggplot(res, aes(logFC, -log10(adj.P.Val), label=TF)) + geom_text() 
+```
+
+
+(P-values look weird and I don't know why...)
+
+```{r}
+metadata(dev)$anno_colors <- list(condition=c(CTRL="lightgrey", FSS="darkred"))
+sechm::sechm(dev, features = head(res$TF), assayName="z", top_annotation = c("condition", "depth"))
+```
+
+```{r}
+view_motifs(motifs[head(res$TF)])
+```
+
+
