@@ -1,0 +1,92 @@
+---
+title: "assignment"
+author: "Audran Feuvrier"
+date: "2024-05-13"
+output: html_document
+---
+
+```{r}
+suppressPackageStartupMessages({
+  library(GenomicRanges)
+  library(epiwraps)
+  library(ggplot2)
+  library(rGREAT) # Gene Ontology enrichment among genomic regions
+})
+```
+
+```{r}
+peaks <- list.files(pattern="bed$") #list the bed files in the working directory
+peaks <- lapply(peaks, rtracklayer::import.bed) # import the peaks
+
+# we'll focus on the high-quality peaks
+peaks <- lapply(peaks, FUN=function(x) x[x$score>800])
+# we get the union of non-redundant regions
+regions <- reduce(unlist(GRangesList(peaks)))
+
+tracks <- list.files(pattern="bw$")
+```
+
+```{r}
+ese <- signal2Matrix(tracks, regions, extend=2000)
+plotEnrichedHeatmaps(ese)
+```
+
+Let's try to find an adequate number of cluster :
+```{r}
+cl2 <- clusterSignalMatrices(ese, k=2:10)
+ggplot(cl2$varExplained, aes(k, varExplained)) + geom_line()
+```
+
+Elbow method gives a clear elbow at k=3 number of clusters with an explained variance of 63%.
+
+
+## Clustering
+
+
+```{r}
+set.seed(123)
+cl <- clusterSignalMatrices(ese, k=3, scaleRows = TRUE)
+rowData(ese)$cluster <- cl 
+
+d <- meltSignals(ese, splitBy="cluster")
+ggplot(d, aes(position, mean, colour=sample)) + geom_line() + facet_wrap(~split)
+
+
+mycolors <- c("1"="red", "2"="blue", "3"="darkgreen")
+plotEnrichedHeatmaps(ese, row_split="cluster", mean_color=mycolors, colors=c("white","darkred"), scale_rows = "global")
+```
+Even though the elbow showed a clear change in inertia between 3 and 4 clusters I think here cluster 2 could be separated into two more. Let's see if setting k=4 in the kmeans does that:
+
+```{r}
+set.seed(123)
+cl <- clusterSignalMatrices(ese, k=4, scaleRows = TRUE)
+rowData(ese)$cluster <- cl 
+
+d <- meltSignals(ese, splitBy="cluster")
+ggplot(d, aes(position, mean, colour=sample)) + geom_line() + facet_wrap(~split)
+
+
+mycolors <- c("1"="red", "2"="blue", "3"="darkgreen", "4"="black")
+plotEnrichedHeatmaps(ese, row_split="cluster", mean_color=mycolors, colors=c("white","darkred"), scale_rows = "global")
+```
+This new clustering separated the previous cluster 2 into the new clusters 1 and 2. This clustering seems more accurate to me and explains more of the variance in the data.
+
+In cluster 4 we see that regions where CREB1 is bound little CREB3 and CREB3L1 is found. Let's see if this cluster is enriched in regions associated with specific pathways.
+
+
+```{r}
+# we first split the regions by cluster:
+split_regions <- split(rowRanges(ese), rowData(ese)$cluster)
+
+res <- great(split_regions[["4"]], gene_sets="GO:BP", tss_source="hg38", 
+             background=regions, cores=6) 
+bp <- getEnrichmentTables(res)
+```
+
+```{r, fig.width=9, fig.height=6}
+ggplot(head(bp,15), aes(fold_enrichment, reorder(description, p_adjust_hyper), 
+                        size=observed_region_hits, color=-log10(p_adjust_hyper))) + 
+  geom_point() + scale_color_viridis_c()
+```
+
+Cluster 4 (which is mainly regions bound by CREB1) seems to be significantly enriched in genes associated with pathways like cell migration, plasma membrane dynamics, cell projection. 
